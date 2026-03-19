@@ -1,0 +1,1247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>rt-sketch / svg editor</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+    background: #111;
+    color: #ddd;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    background: #1a1a1a;
+    border-bottom: 1px solid #333;
+    overflow: hidden;
+}
+
+header h1 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+}
+
+#stats {
+    flex: 1;
+    display: flex;
+    gap: 1rem;
+    font-size: 0.85rem;
+    color: #999;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+#stats::-webkit-scrollbar { display: none; }
+
+.stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    white-space: nowrap;
+}
+
+.stat label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.stat strong {
+    color: #6f6;
+    font-weight: 500;
+}
+
+main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 1rem;
+    overflow-y: auto;
+    max-width: 900px;
+    margin: 0 auto;
+    width: 100%;
+    min-height: 0;
+    scrollbar-width: thin;
+    scrollbar-color: #444 #1a1a1a;
+}
+
+main::-webkit-scrollbar {
+    width: 6px;
+}
+
+main::-webkit-scrollbar-track {
+    background: #1a1a1a;
+}
+
+main::-webkit-scrollbar-thumb {
+    background: #444;
+    border-radius: 3px;
+}
+
+main::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+.panel {
+    display: flex;
+    flex-direction: column;
+    background: #1a1a1a;
+    border-radius: 6px;
+    border: 1px solid #333;
+}
+
+.panel h2 {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #888;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #333;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.panel-body {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #222;
+}
+
+.panel-body svg {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+/* --- crop overlay --- */
+.crop-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.crop-shade {
+    position: absolute;
+    background: rgba(0, 0, 0, 0.55);
+}
+.crop-shade-top    { top: 0; left: 0; right: 0; }
+.crop-shade-bottom { bottom: 0; left: 0; right: 0; }
+.crop-shade-left   { left: 0; }
+.crop-shade-right  { right: 0; }
+
+.crop-box {
+    position: absolute;
+    border: 1.5px dashed rgba(102, 255, 102, 0.7);
+    pointer-events: auto;
+    cursor: move;
+}
+
+.crop-handle {
+    position: absolute;
+    pointer-events: auto;
+    z-index: 2;
+}
+
+.crop-handle-left,
+.crop-handle-right {
+    width: 8px;
+    top: 0;
+    bottom: 0;
+    cursor: ew-resize;
+}
+
+.crop-handle-left  { left: -4px; }
+.crop-handle-right { right: -4px; }
+
+.crop-handle-top,
+.crop-handle-bottom {
+    height: 8px;
+    left: 0;
+    right: 0;
+    cursor: ns-resize;
+}
+
+.crop-handle-top    { top: -4px; }
+.crop-handle-bottom { bottom: -4px; }
+
+/* corner handles */
+.crop-handle-corner {
+    width: 12px;
+    height: 12px;
+    pointer-events: auto;
+    z-index: 3;
+    position: absolute;
+}
+
+.crop-handle-tl { top: -6px; left: -6px; cursor: nwse-resize; }
+.crop-handle-tr { top: -6px; right: -6px; cursor: nesw-resize; }
+.crop-handle-bl { bottom: -6px; left: -6px; cursor: nesw-resize; }
+.crop-handle-br { bottom: -6px; right: -6px; cursor: nwse-resize; }
+
+/* corner tick marks */
+.crop-tick {
+    position: absolute;
+    pointer-events: none;
+    z-index: 4;
+}
+
+.crop-tick::before,
+.crop-tick::after {
+    content: '';
+    position: absolute;
+    background: #6f6;
+}
+
+.crop-tick-tl::before { width: 10px; height: 1.5px; top: 0; left: 0; }
+.crop-tick-tl::after  { width: 1.5px; height: 10px; top: 0; left: 0; }
+.crop-tick-tr::before { width: 10px; height: 1.5px; top: 0; right: 0; }
+.crop-tick-tr::after  { width: 1.5px; height: 10px; top: 0; right: 0; }
+.crop-tick-bl::before { width: 10px; height: 1.5px; bottom: 0; left: 0; }
+.crop-tick-bl::after  { width: 1.5px; height: 10px; bottom: 0; left: 0; }
+.crop-tick-br::before { width: 10px; height: 1.5px; bottom: 0; right: 0; }
+.crop-tick-br::after  { width: 1.5px; height: 10px; bottom: 0; right: 0; }
+
+.drop-zone {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 300px;
+    color: #555;
+    font-size: 0.85rem;
+    cursor: pointer;
+    border: 2px dashed transparent;
+    transition: border-color 0.15s, color 0.15s;
+}
+
+.drop-zone.dragover {
+    border-color: #6f6;
+    color: #6f6;
+}
+
+.drop-zone input[type="file"] {
+    display: none;
+}
+
+footer {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: #1a1a1a;
+    border-top: 1px solid #333;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+}
+
+.footer-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.slider-label {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: #999;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+}
+
+.slider-label span {
+    min-width: 3rem;
+    color: #6f6;
+    text-align: right;
+}
+
+.slider-label-text {
+    display: inline-block;
+    width: 3rem;
+    color: #999;
+    white-space: nowrap;
+    text-align: right;
+}
+
+.slider-label input[type="range"] {
+    flex: 1;
+    min-width: 40px;
+    accent-color: #6f6;
+}
+
+.footer-buttons {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.footer-buttons button {
+    flex: 1;
+}
+
+button {
+    font-family: inherit;
+    font-size: 0.85rem;
+    padding: 0.4rem 1rem;
+    background: #333;
+    color: #ddd;
+    border: 1px solid #555;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+button:hover { background: #444; }
+button:active { background: #555; }
+
+@media (max-width: 600px) {
+    header h1 { display: none; }
+}
+    </style>
+</head>
+<body>
+    <header>
+        <h1>svg editor</h1>
+        <div id="stats">
+            <span class="stat"><label>size</label><strong id="stat-size">-</strong></span>
+            <span class="stat"><label>lines</label><strong id="stat-total">0</strong></span>
+            <span class="stat"><label>groups</label><strong id="stat-groups">0</strong></span>
+            <span class="stat"><label>showing</label><strong id="stat-showing">0</strong></span>
+            <span class="stat"><label>range</label><strong id="stat-range">-</strong></span>
+            <span class="stat"><label>crop</label><strong id="stat-crop">-</strong></span>
+            <span class="stat"><label>output</label><strong id="stat-output">-</strong></span>
+        </div>
+        <label style="margin-left:auto;display:flex;align-items:center;gap:0.3rem;color:#999;white-space:nowrap;font-size:0.8rem;cursor:pointer"><input type="checkbox" id="chk-trim" style="accent-color:#6f6">trim</label>
+        <button id="btn-export" style="white-space:nowrap" disabled>Export</button>
+    </header>
+    <main>
+        <div class="panel">
+            <h2>svg preview</h2>
+            <div class="panel-body" id="svg-container">
+                <div class="drop-zone" id="drop-zone">
+                    <span>drop an SVG here or click to browse</span>
+                    <input type="file" id="file-input" accept=".svg">
+                </div>
+            </div>
+        </div>
+        <div class="panel" id="preview-panel" style="display:none">
+            <h2>export preview</h2>
+            <div class="panel-body" id="preview-container" style="background:#fff"></div>
+        </div>
+        <div class="panel" id="instance-panel" style="display:none">
+            <h2 style="display:flex;align-items:center;gap:0.5rem">instances <span id="instance-quick-toggles" style="display:flex;gap:0.3rem;margin-left:auto"></span></h2>
+            <div id="instance-toggles" style="padding:0.5rem 0.75rem;display:flex;flex-wrap:wrap;gap:0.4rem"></div>
+        </div>
+    </main>
+    <footer>
+        <div class="footer-row">
+            <span class="slider-label-text">start</span>
+            <input type="range" id="slider-start" min="0" max="0" step="1" value="0" disabled style="flex:1">
+            <span id="val-start" style="min-width:3rem;text-align:right;color:#6f6">0</span>
+            <span id="group-start" style="font-size:0.75rem;min-width:8rem;color:#999"></span>
+        </div>
+        <div class="footer-row">
+            <span class="slider-label-text">end</span>
+            <input type="range" id="slider-end" min="0" max="0" step="1" value="0" disabled style="flex:1">
+            <span id="val-end" style="min-width:3rem;text-align:right;color:#6f6">0</span>
+            <span id="group-end" style="font-size:0.75rem;min-width:8rem;color:#999"></span>
+        </div>
+        <div class="footer-row">
+            <label style="display:flex;align-items:center;gap:0.3rem;color:#999;white-space:nowrap">width <input type="number" id="input-width" step="any" disabled style="width:5rem;background:#222;color:#ddd;border:1px solid #555;border-radius:4px;padding:0.2rem 0.4rem;font-family:inherit;font-size:0.85rem"><span id="val-width-unit" style="color:#6f6">cm</span></label>
+            <label style="display:flex;align-items:center;gap:0.3rem;color:#999;white-space:nowrap">height <input type="number" id="input-height" step="any" disabled style="width:5rem;background:#222;color:#ddd;border:1px solid #555;border-radius:4px;padding:0.2rem 0.4rem;font-family:inherit;font-size:0.85rem"><span id="val-height-unit" style="color:#6f6">cm</span></label>
+            <label style="display:flex;align-items:center;gap:0.3rem;color:#999;white-space:nowrap">stroke <input type="number" id="input-stroke" step="any" min="0.001" disabled style="width:5rem;background:#222;color:#ddd;border:1px solid #555;border-radius:4px;padding:0.2rem 0.4rem;font-family:inherit;font-size:0.85rem"><span id="val-stroke-unit" style="color:#6f6">cm</span></label>
+            <button id="btn-reset-crop" disabled style="white-space:nowrap;padding:0.3rem 0.6rem;font-size:0.75rem">Reset Crop</button>
+            <button id="btn-reset-size" disabled style="white-space:nowrap;padding:0.3rem 0.6rem;font-size:0.75rem">Reset Size</button>
+        </div>
+        <div class="footer-buttons">
+            <button id="btn-reset">Clear</button>
+        </div>
+    </footer>
+    <script>
+const svgContainer = document.getElementById('svg-container');
+const sliderStart = document.getElementById('slider-start');
+const sliderEnd = document.getElementById('slider-end');
+const valStart = document.getElementById('val-start');
+const valEnd = document.getElementById('val-end');
+const statTotal = document.getElementById('stat-total');
+const statShowing = document.getElementById('stat-showing');
+const statRange = document.getElementById('stat-range');
+const statCrop = document.getElementById('stat-crop');
+const statOutput = document.getElementById('stat-output');
+const btnReset = document.getElementById('btn-reset');
+const btnExport = document.getElementById('btn-export');
+const btnResetSize = document.getElementById('btn-reset-size');
+const btnResetCrop = document.getElementById('btn-reset-crop');
+const inputWidth = document.getElementById('input-width');
+const inputHeight = document.getElementById('input-height');
+const inputStroke = document.getElementById('input-stroke');
+const previewPanel = document.getElementById('preview-panel');
+const previewContainer = document.getElementById('preview-container');
+
+let allLines = [];
+let stampGroups = []; // { start, count, path, groupEl }
+let instanceGroups = []; // { name, groupEl, visible }
+let svgWrapper = null;
+let origVB = { x: 0, y: 0, w: 0, h: 0 };
+let origWidthNum = 0;
+let origHeightNum = 0;
+let origUnit = 'cm';
+let origFilename = '';
+let origStrokeWidth = 0.05;
+let origSvgText = '';
+
+// --- IndexedDB persistence ---
+const DB_NAME = 'svg-editor';
+const DB_STORE = 'files';
+
+function openDB() {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = () => req.result.createObjectStore(DB_STORE);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function saveSvgToDB(svgText, filename) {
+    const db = await openDB();
+    const tx = db.transaction(DB_STORE, 'readwrite');
+    tx.objectStore(DB_STORE).put({ svg: svgText, filename }, 'current');
+}
+
+async function loadSvgFromDB() {
+    const db = await openDB();
+    return new Promise((resolve) => {
+        const tx = db.transaction(DB_STORE, 'readonly');
+        const req = tx.objectStore(DB_STORE).get('current');
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+    });
+}
+
+// crop state as fractions [0,1]
+let crop = { l: 0, t: 0, r: 1, b: 1 };
+let cropOverlay = null;
+
+// --- drag & drop ---
+function bindDropZone(dz, fi) {
+    dz.addEventListener('click', () => fi.click());
+    fi.addEventListener('change', (e) => {
+        if (e.target.files.length) loadFile(e.target.files[0]);
+    });
+    dz.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dz.classList.add('dragover');
+    });
+    dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+    dz.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dz.classList.remove('dragover');
+        if (e.dataTransfer.files.length) loadFile(e.dataTransfer.files[0]);
+    });
+}
+
+bindDropZone(document.getElementById('drop-zone'), document.getElementById('file-input'));
+
+// Always accept drops on the container (even after SVG replaces drop zone)
+svgContainer.addEventListener('dragover', (e) => e.preventDefault());
+svgContainer.addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (e.dataTransfer.files.length) loadFile(e.dataTransfer.files[0]);
+});
+
+// Restore last SVG from IndexedDB on page load
+loadSvgFromDB().then(data => {
+    if (data) {
+        origFilename = data.filename || 'rt-sketch';
+        parseSVG(data.svg);
+    }
+});
+
+function loadFile(file) {
+    if (!file.name.endsWith('.svg') && file.type !== 'image/svg+xml') return;
+    origFilename = file.name.replace(/\.svg$/i, '');
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const svgText = e.target.result;
+        parseSVG(svgText);
+        saveSvgToDB(svgText, origFilename);
+    };
+    reader.readAsText(file);
+}
+
+function parseSVG(svgText) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(svgText, 'image/svg+xml');
+    const svg = doc.querySelector('svg');
+    if (!svg) return;
+
+    allLines = Array.from(svg.querySelectorAll('line'));
+
+    // build stamp group index from <g data-stamp-path> elements
+    stampGroups = [];
+    svg.querySelectorAll('g[data-stamp-path]').forEach(g => {
+        const lines = Array.from(g.querySelectorAll('line'));
+        if (lines.length === 0) return;
+        const start = allLines.indexOf(lines[0]);
+        if (start >= 0) {
+            g.setAttribute('data-original-count', lines.length);
+            stampGroups.push({
+                start,
+                count: lines.length,
+                path: g.getAttribute('data-stamp-path'),
+                groupEl: g
+            });
+        }
+    });
+
+    // build instance group index from <g data-instance> wrapper elements
+    instanceGroups = [];
+    svg.querySelectorAll('g[data-instance]').forEach(g => {
+        // only top-level instance wrappers (not stamp groups that also have data-instance)
+        if (!g.hasAttribute('data-stamp-path')) {
+            instanceGroups.push({
+                name: g.getAttribute('data-instance'),
+                groupEl: g,
+                visible: true
+            });
+        }
+    });
+    buildInstanceToggles();
+
+    // capture original stroke width from first line
+    if (allLines.length > 0) {
+        origStrokeWidth = parseFloat(allLines[0].getAttribute('stroke-width')) || 0.05;
+    }
+    origSvgText = svgText;
+
+    // capture original viewBox
+    const vb = svg.getAttribute('viewBox');
+    if (vb) {
+        const parts = vb.split(/[\s,]+/).map(Number);
+        origVB = { x: parts[0], y: parts[1], w: parts[2], h: parts[3] };
+    } else {
+        origVB = { x: 0, y: 0, w: parseFloat(svg.getAttribute('width')) || 100, h: parseFloat(svg.getAttribute('height')) || 100 };
+    }
+
+    // capture original dimensions
+    const rawW = svg.getAttribute('width') || String(origVB.w);
+    const rawH = svg.getAttribute('height') || String(origVB.h);
+    const unitMatch = rawW.match(/[a-z%]+$/i);
+    origUnit = unitMatch ? unitMatch[0] : '';
+    origWidthNum = parseFloat(rawW);
+    origHeightNum = parseFloat(rawH);
+    document.getElementById('stat-size').textContent =
+        origWidthNum + '×' + origHeightNum + origUnit;
+
+    // insert SVG
+    svgContainer.innerHTML = '';
+    svgContainer.appendChild(svg);
+    svgWrapper = svg;
+
+    const total = allLines.length;
+    statTotal.textContent = total;
+    document.getElementById('stat-groups').textContent = stampGroups.length;
+
+    sliderStart.max = total; sliderStart.value = 0; sliderStart.disabled = false;
+    sliderEnd.max = total; sliderEnd.value = total; sliderEnd.disabled = false;
+
+    // restore crop from localStorage if it fits within the new viewBox
+    crop = { l: 0, t: 0, r: 1, b: 1 };
+    try {
+        const saved = JSON.parse(localStorage.getItem('svg-debug-crop'));
+        if (saved) {
+            // saved is in absolute viewBox coords {x1, y1, x2, y2}
+            // convert to fractions relative to this SVG's viewBox
+            const fl = (saved.x1 - origVB.x) / origVB.w;
+            const ft = (saved.y1 - origVB.y) / origVB.h;
+            const fr = (saved.x2 - origVB.x) / origVB.w;
+            const fb = (saved.y2 - origVB.y) / origVB.h;
+            // only restore if fully within bounds and valid
+            if (fl >= 0 && ft >= 0 && fr <= 1 && fb <= 1 && fr > fl + 0.02 && fb > ft + 0.02) {
+                crop = { l: fl, t: ft, r: fr, b: fb };
+            }
+        }
+    } catch (_) {}
+
+    // size inputs
+    inputWidth.value = origWidthNum.toFixed(2);
+    inputHeight.value = origHeightNum.toFixed(2);
+    inputWidth.disabled = false;
+    inputHeight.disabled = false;
+    btnResetSize.disabled = false;
+    btnResetCrop.disabled = false;
+    document.getElementById('val-width-unit').textContent = origUnit;
+    document.getElementById('val-height-unit').textContent = origUnit;
+
+    // stroke width - default to original physical stroke width
+    inputStroke.value = origStrokeWidth.toFixed(4);
+    inputStroke.disabled = false;
+    document.getElementById('val-stroke-unit').textContent = origUnit;
+
+    btnExport.disabled = false;
+    previewPanel.style.display = '';
+
+    // build crop overlay
+    buildCropOverlay();
+    updateDisplay();
+}
+
+// --- crop overlay DOM ---
+function buildCropOverlay() {
+    if (cropOverlay) cropOverlay.remove();
+    cropOverlay = document.createElement('div');
+    cropOverlay.className = 'crop-overlay';
+
+    // four shade regions
+    ['top', 'bottom', 'left', 'right'].forEach(side => {
+        const d = document.createElement('div');
+        d.className = `crop-shade crop-shade-${side}`;
+        cropOverlay.appendChild(d);
+    });
+
+    // crop box with handles
+    const box = document.createElement('div');
+    box.className = 'crop-box';
+
+    ['left', 'right', 'top', 'bottom'].forEach(side => {
+        const h = document.createElement('div');
+        h.className = `crop-handle crop-handle-${side}`;
+        h.dataset.edge = side;
+        box.appendChild(h);
+    });
+
+    // corner handles
+    ['tl', 'tr', 'bl', 'br'].forEach(corner => {
+        const h = document.createElement('div');
+        h.className = `crop-handle crop-handle-corner crop-handle-${corner}`;
+        h.dataset.corner = corner;
+        box.appendChild(h);
+    });
+
+    // corner ticks
+    ['tl', 'tr', 'bl', 'br'].forEach(corner => {
+        const t = document.createElement('div');
+        t.className = `crop-tick crop-tick-${corner}`;
+        box.appendChild(t);
+    });
+
+    cropOverlay.appendChild(box);
+    svgContainer.appendChild(cropOverlay);
+
+    // drag handling
+    initCropDrag();
+}
+
+function layoutCropOverlay() {
+    if (!cropOverlay) return;
+    const shades = cropOverlay.querySelectorAll('.crop-shade');
+    const box = cropOverlay.querySelector('.crop-box');
+
+    const lPct = (crop.l * 100).toFixed(3) + '%';
+    const tPct = (crop.t * 100).toFixed(3) + '%';
+    const rPct = ((1 - crop.r) * 100).toFixed(3) + '%';
+    const bPct = ((1 - crop.b) * 100).toFixed(3) + '%';
+    const wPct = ((crop.r - crop.l) * 100).toFixed(3) + '%';
+    const hPct = ((crop.b - crop.t) * 100).toFixed(3) + '%';
+
+    // top shade
+    shades[0].style.cssText = `top:0;left:0;right:0;height:${tPct}`;
+    // bottom shade
+    shades[1].style.cssText = `bottom:0;left:0;right:0;height:${bPct}`;
+    // left shade
+    shades[2].style.cssText = `top:${tPct};left:0;width:${lPct};height:${hPct}`;
+    // right shade
+    shades[3].style.cssText = `top:${tPct};right:0;width:${rPct};height:${hPct}`;
+
+    box.style.left = lPct;
+    box.style.top = tPct;
+    box.style.width = wPct;
+    box.style.height = hPct;
+}
+
+function initCropDrag() {
+    const box = cropOverlay.querySelector('.crop-box');
+    let dragging = null; // { type: 'edge'|'corner', edge/corner, startX, startY, startCrop }
+
+    function onPointerDown(e) {
+        e.preventDefault();
+        const target = e.target;
+        const rect = svgContainer.getBoundingClientRect();
+        const startCrop = { ...crop };
+
+        if (target.dataset.edge) {
+            dragging = { type: 'edge', edge: target.dataset.edge, startX: e.clientX, startY: e.clientY, startCrop, rect };
+        } else if (target.dataset.corner) {
+            dragging = { type: 'corner', corner: target.dataset.corner, startX: e.clientX, startY: e.clientY, startCrop, rect };
+        } else {
+            dragging = { type: 'move', startX: e.clientX, startY: e.clientY, startCrop, rect };
+        }
+
+        if (dragging) {
+            document.addEventListener('pointermove', onPointerMove);
+            document.addEventListener('pointerup', onPointerUp);
+        }
+    }
+
+    function onPointerMove(e) {
+        if (!dragging) return;
+        const dx = (e.clientX - dragging.startX) / dragging.rect.width;
+        const dy = (e.clientY - dragging.startY) / dragging.rect.height;
+        const sc = dragging.startCrop;
+        const MIN = 0.02; // minimum crop region size
+
+        if (dragging.type === 'edge') {
+            switch (dragging.edge) {
+                case 'left':
+                    crop.l = clamp(sc.l + dx, 0, crop.r - MIN); break;
+                case 'right':
+                    crop.r = clamp(sc.r + dx, crop.l + MIN, 1); break;
+                case 'top':
+                    crop.t = clamp(sc.t + dy, 0, crop.b - MIN); break;
+                case 'bottom':
+                    crop.b = clamp(sc.b + dy, crop.t + MIN, 1); break;
+            }
+        } else if (dragging.type === 'move') {
+            const w = sc.r - sc.l;
+            const h = sc.b - sc.t;
+            let newL = sc.l + dx;
+            let newT = sc.t + dy;
+            // clamp so the box stays within bounds
+            newL = clamp(newL, 0, 1 - w);
+            newT = clamp(newT, 0, 1 - h);
+            crop.l = newL; crop.r = newL + w;
+            crop.t = newT; crop.b = newT + h;
+        } else if (dragging.type === 'corner') {
+            switch (dragging.corner) {
+                case 'tl':
+                    crop.l = clamp(sc.l + dx, 0, crop.r - MIN);
+                    crop.t = clamp(sc.t + dy, 0, crop.b - MIN); break;
+                case 'tr':
+                    crop.r = clamp(sc.r + dx, crop.l + MIN, 1);
+                    crop.t = clamp(sc.t + dy, 0, crop.b - MIN); break;
+                case 'bl':
+                    crop.l = clamp(sc.l + dx, 0, crop.r - MIN);
+                    crop.b = clamp(sc.b + dy, crop.t + MIN, 1); break;
+                case 'br':
+                    crop.r = clamp(sc.r + dx, crop.l + MIN, 1);
+                    crop.b = clamp(sc.b + dy, crop.t + MIN, 1); break;
+            }
+        }
+
+        layoutCropOverlay();
+        updateSizeFromCrop();
+        updateStats();
+    }
+
+    function onPointerUp() {
+        dragging = null;
+        document.removeEventListener('pointermove', onPointerMove);
+        document.removeEventListener('pointerup', onPointerUp);
+        saveCrop();
+    }
+
+    box.addEventListener('pointerdown', onPointerDown);
+}
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+function getCropVB() {
+    const x = origVB.x + crop.l * origVB.w;
+    const y = origVB.y + crop.t * origVB.h;
+    const w = (crop.r - crop.l) * origVB.w;
+    const h = (crop.b - crop.t) * origVB.h;
+    return { x, y, w, h };
+}
+
+function isCropped() {
+    return crop.l > 0.001 || crop.t > 0.001 || crop.r < 0.999 || crop.b < 0.999;
+}
+
+function saveCrop() {
+    const vb = getCropVB();
+    localStorage.setItem('svg-debug-crop', JSON.stringify({
+        x1: vb.x, y1: vb.y, x2: vb.x + vb.w, y2: vb.y + vb.h
+    }));
+}
+
+function updateSizeFromCrop() {
+    const vb = getCropVB();
+    const scaleW = origWidthNum / origVB.w;
+    const scaleH = origHeightNum / origVB.h;
+    inputWidth.value = (vb.w * scaleW).toFixed(2);
+    inputHeight.value = (vb.h * scaleH).toFixed(2);
+}
+
+// Cohen-Sutherland line clipping
+function clipLineToRect(x1, y1, x2, y2, xmin, ymin, xmax, ymax) {
+    const INSIDE = 0, LEFT = 1, RIGHT = 2, BOTTOM = 4, TOP = 8;
+    function code(x, y) {
+        let c = INSIDE;
+        if (x < xmin) c |= LEFT;
+        else if (x > xmax) c |= RIGHT;
+        if (y < ymin) c |= TOP;
+        else if (y > ymax) c |= BOTTOM;
+        return c;
+    }
+    let c1 = code(x1, y1), c2 = code(x2, y2);
+    while (true) {
+        if (!(c1 | c2)) return { x1, y1, x2, y2 }; // both inside
+        if (c1 & c2) return null; // both outside same side
+        const cout = c1 || c2;
+        let x, y;
+        if (cout & BOTTOM) { x = x1 + (x2 - x1) * (ymax - y1) / (y2 - y1); y = ymax; }
+        else if (cout & TOP) { x = x1 + (x2 - x1) * (ymin - y1) / (y2 - y1); y = ymin; }
+        else if (cout & RIGHT) { y = y1 + (y2 - y1) * (xmax - x1) / (x2 - x1); x = xmax; }
+        else { y = y1 + (y2 - y1) * (xmin - x1) / (x2 - x1); x = xmin; }
+        if (cout === c1) { x1 = x; y1 = y; c1 = code(x1, y1); }
+        else { x2 = x; y2 = y; c2 = code(x2, y2); }
+    }
+}
+
+function buildExportSvg() {
+    if (!svgWrapper) return null;
+    const clone = svgWrapper.cloneNode(true);
+    const trim = document.getElementById('chk-trim').checked;
+
+    // handle hidden instance wrappers: strip content but keep empty <g> as metadata
+    clone.querySelectorAll('g[data-instance]').forEach(g => {
+        if (g.style.display === 'none') {
+            const lineCount = g.querySelectorAll('line').length;
+            g.innerHTML = '';
+            g.removeAttribute('style');
+            g.setAttribute('data-excluded', 'true');
+            g.setAttribute('data-line-count', lineCount);
+        }
+    });
+    // handle hidden stamp groups within visible instances
+    clone.querySelectorAll('g[data-stamp-path]').forEach(g => {
+        if (g.style.display === 'none') {
+            const lineCount = g.querySelectorAll('line').length;
+            g.innerHTML = '';
+            g.removeAttribute('style');
+            g.setAttribute('data-excluded', 'true');
+            g.setAttribute('data-line-count', lineCount);
+        }
+    });
+
+    // strip hidden lines (from range sliders, not instance toggles)
+    clone.querySelectorAll('line').forEach(l => {
+        if (l.style.display === 'none') l.remove();
+    });
+
+    // annotate stamp groups: mark empty ones as excluded, annotate partial ones
+    clone.querySelectorAll('g[data-stamp-path]').forEach(g => {
+        if (g.hasAttribute('data-excluded')) return; // already handled by instance/stamp toggle
+        const remaining = g.querySelectorAll('line').length;
+        const origCount = parseInt(g.getAttribute('data-original-count')) || 0;
+        if (remaining === 0) {
+            g.setAttribute('data-excluded', 'true');
+            g.setAttribute('data-line-count', '0');
+        } else if (origCount > 0 && remaining < origCount) {
+            g.setAttribute('data-export-count', remaining);
+        }
+    });
+
+    // apply crop viewBox
+    const vb = getCropVB();
+    clone.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+
+    // trim lines to crop boundary
+    if (trim) {
+        clone.querySelectorAll('line').forEach(l => {
+            const clipped = clipLineToRect(
+                parseFloat(l.getAttribute('x1')), parseFloat(l.getAttribute('y1')),
+                parseFloat(l.getAttribute('x2')), parseFloat(l.getAttribute('y2')),
+                vb.x, vb.y, vb.x + vb.w, vb.y + vb.h
+            );
+            if (!clipped) { l.remove(); return; }
+            l.setAttribute('x1', clipped.x1);
+            l.setAttribute('y1', clipped.y1);
+            l.setAttribute('x2', clipped.x2);
+            l.setAttribute('y2', clipped.y2);
+        });
+    }
+
+    // apply output size
+    const w = parseFloat(inputWidth.value);
+    const h = parseFloat(inputHeight.value);
+    if (w > 0 && h > 0) {
+        clone.setAttribute('width', w + origUnit);
+        clone.setAttribute('height', h + origUnit);
+    }
+
+    // apply stroke width: user specifies physical size, convert to viewBox coords
+    const strokePhysical = parseFloat(inputStroke.value);
+    if (strokePhysical > 0 && w > 0) {
+        // scale factor: how many viewBox units per output unit
+        const scale = vb.w / w;
+        const strokeVB = strokePhysical * scale;
+        clone.querySelectorAll('line').forEach(l => {
+            l.setAttribute('stroke-width', strokeVB.toFixed(6));
+        });
+    }
+
+    return clone;
+}
+
+function updatePreview() {
+    const clone = buildExportSvg();
+    if (!clone) return;
+    previewContainer.innerHTML = '';
+    // for display, let it fill the panel width
+    clone.removeAttribute('width');
+    clone.removeAttribute('height');
+    clone.style.width = '100%';
+    clone.style.height = 'auto';
+    previewContainer.appendChild(clone);
+}
+
+function updateStats() {
+    const vb = getCropVB();
+    if (isCropped()) {
+        statCrop.textContent = `${vb.x.toFixed(1)},${vb.y.toFixed(1)}–${(vb.x+vb.w).toFixed(1)},${(vb.y+vb.h).toFixed(1)}`;
+    } else {
+        statCrop.textContent = '-';
+    }
+    const w = parseFloat(inputWidth.value);
+    const h = parseFloat(inputHeight.value);
+    statOutput.textContent = (w > 0 && h > 0) ? `${w}×${h}${origUnit}` : '-';
+    updatePreview();
+}
+
+function findGroup(idx) {
+    for (let i = 0; i < stampGroups.length; i++) {
+        const g = stampGroups[i];
+        if (idx >= g.start && idx < g.start + g.count) {
+            return { group: g, index: i, inside: true };
+        }
+    }
+    return { group: null, index: -1, inside: false };
+}
+
+function isGroupBoundary(idx) {
+    for (const g of stampGroups) {
+        if (idx === g.start || idx === g.start + g.count) return true;
+    }
+    // idx is not at any group boundary — but if it's outside all groups, it's clean
+    for (const g of stampGroups) {
+        if (idx > g.start && idx < g.start + g.count) return false;
+    }
+    return true;
+}
+
+function updateGroupLabel(idx, spanEl, isStart) {
+    const info = findGroup(idx);
+    if (!info.inside) {
+        spanEl.textContent = '';
+        spanEl.style.color = '#999';
+        return;
+    }
+    const g = info.group;
+    const label = `group ${info.index + 1}/${stampGroups.length}`;
+    const splits = isStart
+        ? (idx > g.start)
+        : (idx < g.start + g.count);
+    spanEl.textContent = label;
+    spanEl.style.color = splits ? '#f66' : '#999';
+}
+
+function buildInstanceToggles() {
+    const panel = document.getElementById('instance-panel');
+    const container = document.getElementById('instance-toggles');
+    container.innerHTML = '';
+    if (instanceGroups.length === 0) {
+        panel.style.display = 'none';
+        return;
+    }
+    panel.style.display = '';
+
+    const btnBase = 'font-size:0.75rem;padding:0.25rem 0.6rem;border-radius:3px;cursor:pointer;font-family:inherit;background:#222;';
+
+    function styleBtn(btn, active, color) {
+        btn.style.cssText = btnBase + (active
+            ? 'border:1px solid ' + color + ';color:' + color + ';opacity:1;'
+            : 'border:1px solid #555;color:#555;opacity:0.5;');
+    }
+
+    const quickContainer = document.getElementById('instance-quick-toggles');
+    quickContainer.innerHTML = '';
+
+    for (const inst of instanceGroups) {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;flex-wrap:wrap;gap:0.3rem;align-items:center;width:100%;padding:0.3rem 0;border-top:1px solid #333;';
+
+        const stampEls = Array.from(inst.groupEl.querySelectorAll('g[data-stamp-path]'));
+        const totalLines = inst.groupEl.querySelectorAll('line').length;
+
+        // Instance buttons (blue) — one in the row, one in the header, kept in sync
+        const instBtn = document.createElement('button');
+        const quickBtn = document.createElement('button');
+        instBtn.textContent = inst.name + ' (' + totalLines + 'L, ' + stampEls.length + 'S)';
+        quickBtn.textContent = inst.name;
+        styleBtn(instBtn, true, '#48f');
+        styleBtn(quickBtn, true, '#48f');
+
+        function toggleInstance() {
+            inst.visible = !inst.visible;
+            styleBtn(instBtn, inst.visible, '#48f');
+            styleBtn(quickBtn, inst.visible, '#48f');
+            inst.groupEl.style.display = inst.visible ? '' : 'none';
+            updateDisplay();
+        }
+        instBtn.addEventListener('click', toggleInstance);
+        quickBtn.addEventListener('click', toggleInstance);
+        row.appendChild(instBtn);
+        quickContainer.appendChild(quickBtn);
+
+        // Stamp group buttons (green)
+        const stampLineEls = new Set();
+        for (let i = 0; i < stampEls.length; i++) {
+            const el = stampEls[i];
+            const lines = Array.from(el.querySelectorAll('line'));
+            lines.forEach(l => stampLineEls.add(l));
+            const pathName = (el.getAttribute('data-stamp-path') || '').split('/').pop().replace('.svg', '');
+            let visible = true;
+
+            const btn = document.createElement('button');
+            btn.textContent = '#' + (i + 1) + ' ' + pathName + ' (' + lines.length + 'L)';
+            styleBtn(btn, true, '#6f6');
+            btn.addEventListener('click', () => {
+                visible = !visible;
+                styleBtn(btn, visible, '#6f6');
+                el.style.display = visible ? '' : 'none';
+                updateDisplay();
+            });
+            row.appendChild(btn);
+        }
+
+        // Loose lines (direct children not in stamp groups)
+        const allInstLines = Array.from(inst.groupEl.querySelectorAll('line'));
+        const looseLines = allInstLines.filter(l => !stampLineEls.has(l));
+        if (looseLines.length > 0) {
+            let looseVisible = true;
+            const btn = document.createElement('button');
+            btn.textContent = 'loose (' + looseLines.length + 'L)';
+            styleBtn(btn, true, '#999');
+            btn.addEventListener('click', () => {
+                looseVisible = !looseVisible;
+                styleBtn(btn, looseVisible, '#999');
+                for (const l of looseLines) {
+                    l.style.display = looseVisible ? '' : 'none';
+                }
+                updateDisplay();
+            });
+            row.appendChild(btn);
+        }
+
+        container.appendChild(row);
+    }
+}
+
+function updateDisplay() {
+    const start = parseInt(sliderStart.value);
+    const end = parseInt(sliderEnd.value);
+
+    valStart.textContent = start;
+    valEnd.textContent = end;
+
+    let showing = 0;
+    for (let i = 0; i < allLines.length; i++) {
+        const visible = i >= start && i < end;
+        allLines[i].style.display = visible ? '' : 'none';
+        if (visible) showing++;
+    }
+
+    statShowing.textContent = showing;
+    statRange.textContent = allLines.length > 0 ? `${start}–${end}` : '-';
+
+    // group boundary feedback
+    const groupStartEl = document.getElementById('group-start');
+    const groupEndEl = document.getElementById('group-end');
+    if (stampGroups.length > 0) {
+        updateGroupLabel(start, groupStartEl, true);
+        updateGroupLabel(end, groupEndEl, false);
+    } else {
+        groupStartEl.textContent = '';
+        groupEndEl.textContent = '';
+    }
+
+    layoutCropOverlay();
+    updateStats();
+}
+
+// Arrow key support for range sliders (Safari workaround)
+function addArrowKeys(slider, onChange) {
+    slider.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            slider.value = Math.max(parseInt(slider.min), parseInt(slider.value) - 1);
+            onChange();
+        } else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            slider.value = Math.min(parseInt(slider.max), parseInt(slider.value) + 1);
+            onChange();
+        }
+    });
+    // Ensure focus on interaction
+    slider.setAttribute('tabindex', '0');
+    slider.addEventListener('mousedown', () => slider.focus());
+    slider.addEventListener('touchstart', () => slider.focus());
+}
+
+sliderStart.addEventListener('input', () => {
+    if (parseInt(sliderStart.value) > parseInt(sliderEnd.value))
+        sliderStart.value = sliderEnd.value;
+    updateDisplay();
+});
+
+sliderEnd.addEventListener('input', () => {
+    if (parseInt(sliderEnd.value) < parseInt(sliderStart.value))
+        sliderEnd.value = sliderStart.value;
+    updateDisplay();
+});
+
+addArrowKeys(sliderStart, () => {
+    if (parseInt(sliderStart.value) > parseInt(sliderEnd.value))
+        sliderStart.value = sliderEnd.value;
+    updateDisplay();
+});
+addArrowKeys(sliderEnd, () => {
+    if (parseInt(sliderEnd.value) < parseInt(sliderStart.value))
+        sliderEnd.value = sliderStart.value;
+    updateDisplay();
+});
+
+// --- output size ---
+inputWidth.addEventListener('input', () => {
+    const vb = getCropVB();
+    if (vb.w > 0) {
+        const aspect = vb.h / vb.w;
+        inputHeight.value = (parseFloat(inputWidth.value) * aspect).toFixed(2);
+    }
+    updateStats();
+});
+inputHeight.addEventListener('input', () => {
+    const vb = getCropVB();
+    if (vb.h > 0) {
+        const aspect = vb.w / vb.h;
+        inputWidth.value = (parseFloat(inputHeight.value) * aspect).toFixed(2);
+    }
+    updateStats();
+});
+inputStroke.addEventListener('input', () => {
+    updateStats();
+});
+btnResetSize.addEventListener('click', () => {
+    updateSizeFromCrop();
+    updateStats();
+});
+btnResetCrop.addEventListener('click', () => {
+    crop = { l: 0, t: 0, r: 1, b: 1 };
+    localStorage.removeItem('svg-debug-crop');
+    inputWidth.value = origWidthNum.toFixed(2);
+    inputHeight.value = origHeightNum.toFixed(2);
+    updateDisplay();
+});
+
+// --- clear ---
+btnReset.addEventListener('click', () => {
+    openDB().then(db => {
+        const tx = db.transaction(DB_STORE, 'readwrite');
+        tx.objectStore(DB_STORE).delete('current');
+    });
+    svgContainer.innerHTML = '';
+    const dz = document.createElement('div');
+    dz.className = 'drop-zone';
+    dz.id = 'drop-zone';
+    dz.innerHTML = '<span>drop an SVG here or click to browse</span><input type="file" id="file-input" accept=".svg">';
+    svgContainer.appendChild(dz);
+    bindDropZone(document.getElementById('drop-zone'), document.getElementById('file-input'));
+
+    allLines = [];
+    stampGroups = [];
+    instanceGroups = [];
+    document.getElementById('instance-panel').style.display = 'none';
+    document.getElementById('instance-toggles').innerHTML = '';
+    document.getElementById('instance-quick-toggles').innerHTML = '';
+    document.getElementById('stat-size').textContent = '-';
+    document.getElementById('stat-groups').textContent = '0';
+    svgWrapper = null;
+    cropOverlay = null;
+    origFilename = '';
+    crop = { l: 0, t: 0, r: 1, b: 1 };
+    btnExport.disabled = true;
+    btnResetSize.disabled = true;
+    btnResetCrop.disabled = true;
+    sliderStart.value = 0; sliderStart.max = 0; sliderStart.disabled = true;
+    sliderEnd.value = 0; sliderEnd.max = 0; sliderEnd.disabled = true;
+    inputWidth.value = ''; inputWidth.disabled = true;
+    inputHeight.value = ''; inputHeight.disabled = true;
+    inputStroke.value = ''; inputStroke.disabled = true;
+    previewPanel.style.display = 'none';
+    previewContainer.innerHTML = '';
+    valStart.textContent = '0';
+    valEnd.textContent = '0';
+    statTotal.textContent = '0';
+    document.getElementById('stat-groups').textContent = '0';
+    statShowing.textContent = '0';
+    statRange.textContent = '-';
+    statCrop.textContent = '-';
+    statOutput.textContent = '-';
+});
+
+// --- export ---
+btnExport.addEventListener('click', () => {
+    const clone = buildExportSvg();
+    if (!clone) return;
+
+    const vb = getCropVB();
+    const w = parseFloat(inputWidth.value);
+    const h = parseFloat(inputHeight.value);
+
+    const svgText = new XMLSerializer().serializeToString(clone);
+    const blob = new Blob([svgText], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+
+    // build filename: <original>_L<start>-<end>[_C<x1>,<y1>-<x2>,<y2>].svg
+    const start = sliderStart.value;
+    const end = sliderEnd.value;
+    let name = origFilename || 'rt-sketch';
+    name += `_L${start}-${end}`;
+    if (isCropped()) {
+        const x1 = vb.x.toFixed(2);
+        const y1 = vb.y.toFixed(2);
+        const x2 = (vb.x + vb.w).toFixed(2);
+        const y2 = (vb.y + vb.h).toFixed(2);
+        name += `_C${x1},${y1}-${x2},${y2}`;
+    }
+    const sw = parseFloat(inputStroke.value);
+    name += `_S${sw}${origUnit}`;
+    name += `_D${w}x${h}${origUnit}`;
+    name += '.svg';
+    a.download = name;
+
+    a.click();
+    URL.revokeObjectURL(url);
+});
+    </script>
+</body>
+</html>
