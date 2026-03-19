@@ -966,7 +966,7 @@ function buildInstanceToggles() {
     const panel = document.getElementById('instance-panel');
     const container = document.getElementById('instance-toggles');
     container.innerHTML = '';
-    if (instanceGroups.length === 0) {
+    if (instanceGroups.length === 0 && stampGroups.length === 0) {
         panel.style.display = 'none';
         return;
     }
@@ -1043,7 +1043,62 @@ function buildInstanceToggles() {
                 looseVisible = !looseVisible;
                 styleBtn(btn, looseVisible, '#999');
                 for (const l of looseLines) {
-                    l.style.display = looseVisible ? '' : 'none';
+                    if (looseVisible) {
+                        delete l.dataset.userHidden;
+                    } else {
+                        l.dataset.userHidden = '1';
+                    }
+                }
+                updateDisplay();
+            });
+            row.appendChild(btn);
+        }
+
+        container.appendChild(row);
+    }
+
+    // Stamp group toggles for single-instance SVGs (no <g data-instance> wrappers)
+    if (instanceGroups.length === 0 && stampGroups.length > 0) {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;flex-wrap:wrap;gap:0.3rem;align-items:center;width:100%;padding:0.3rem 0;border-top:1px solid #333;';
+
+        const stampLineEls = new Set();
+        for (let i = 0; i < stampGroups.length; i++) {
+            const sg = stampGroups[i];
+            const el = sg.groupEl;
+            const lines = Array.from(el.querySelectorAll('line'));
+            lines.forEach(l => stampLineEls.add(l));
+            const pathName = (sg.path || '').split('/').pop().replace('.svg', '');
+            let visible = true;
+
+            const btn = document.createElement('button');
+            btn.textContent = '#' + (i + 1) + ' ' + pathName + ' (' + lines.length + 'L)';
+            styleBtn(btn, true, '#6f6');
+            btn.addEventListener('click', () => {
+                visible = !visible;
+                styleBtn(btn, visible, '#6f6');
+                el.style.display = visible ? '' : 'none';
+                updateDisplay();
+            });
+            row.appendChild(btn);
+        }
+
+        // Loose lines not in any stamp group
+        const looseLines = allLines.filter(l => !stampLineEls.has(l));
+        if (looseLines.length > 0) {
+            let looseVisible = true;
+            const btn = document.createElement('button');
+            btn.textContent = 'loose (' + looseLines.length + 'L)';
+            styleBtn(btn, true, '#999');
+            btn.addEventListener('click', () => {
+                looseVisible = !looseVisible;
+                styleBtn(btn, looseVisible, '#999');
+                for (const l of looseLines) {
+                    if (looseVisible) {
+                        delete l.dataset.userHidden;
+                    } else {
+                        l.dataset.userHidden = '1';
+                    }
                 }
                 updateDisplay();
             });
@@ -1063,7 +1118,9 @@ function updateDisplay() {
 
     let showing = 0;
     for (let i = 0; i < allLines.length; i++) {
-        const visible = i >= start && i < end;
+        const inRange = i >= start && i < end;
+        const userHidden = allLines[i].dataset.userHidden === '1';
+        const visible = inRange && !userHidden;
         allLines[i].style.display = visible ? '' : 'none';
         if (visible) showing++;
     }
