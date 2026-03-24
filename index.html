@@ -327,6 +327,7 @@ button:active { background: #555; }
             <span class="stat"><label>output</label><strong id="stat-output">-</strong></span>
         </div>
         <label style="margin-left:auto;display:flex;align-items:center;gap:0.3rem;color:#999;white-space:nowrap;font-size:0.8rem;cursor:pointer"><input type="checkbox" id="chk-trim" style="accent-color:#6f6">trim</label>
+        <label style="display:flex;align-items:center;gap:0.3rem;color:#999;white-space:nowrap;font-size:0.8rem;cursor:pointer"><input type="checkbox" id="chk-ribbon" style="accent-color:#6f6">ribbon</label>
         <button id="btn-export" style="white-space:nowrap" disabled>Export</button>
     </header>
     <main>
@@ -397,6 +398,7 @@ let allLines = [];
 let stampGroups = []; // { start, count, path, groupEl }
 let instanceGroups = []; // { name, groupEl, visible }
 let svgWrapper = null;
+let ribbonEnabled = false;
 let origVB = { x: 0, y: 0, w: 0, h: 0 };
 let origWidthNum = 0;
 let origHeightNum = 0;
@@ -817,6 +819,12 @@ function clipLineToRect(x1, y1, x2, y2, xmin, ymin, xmax, ymax) {
 function buildExportSvg() {
     if (!svgWrapper) return null;
     const clone = svgWrapper.cloneNode(true);
+    // always strip ribbon lines first so all processing works on clean original lines
+    clone.querySelectorAll('.ribbon-line').forEach(l => l.remove());
+    // when ribbon is off, also remove any stroke-linecap forced onto original lines
+    if (!ribbonEnabled) {
+        clone.querySelectorAll('line').forEach(l => l.removeAttribute('stroke-linecap'));
+    }
     const trim = document.getElementById('chk-trim').checked;
 
     // handle hidden instance wrappers: strip content but keep empty <g> as metadata
@@ -895,6 +903,11 @@ function buildExportSvg() {
         clone.querySelectorAll('line').forEach(l => {
             l.setAttribute('stroke-width', strokeVB.toFixed(6));
         });
+    }
+
+    // re-apply ribbon to export clone after all processing (stroke-width already final)
+    if (ribbonEnabled) {
+        applyRibbonToLines(Array.from(clone.querySelectorAll('line')));
     }
 
     return clone;
@@ -1109,9 +1122,37 @@ function buildInstanceToggles() {
     }
 }
 
+function clearRibbonLines() {
+    if (!svgWrapper) return;
+    svgWrapper.querySelectorAll('.ribbon-line').forEach(l => l.remove());
+    for (const line of allLines) {
+        line.removeAttribute('stroke-linecap');
+    }
+}
+
+function applyRibbonToLines(lines) {
+    for (const line of lines) {
+        line.setAttribute('stroke-linecap', 'butt');
+        const sw = parseFloat(line.getAttribute('stroke-width')) || origStrokeWidth;
+        const ribbon = line.cloneNode(false);
+        ribbon.setAttribute('stroke', 'white');
+        ribbon.setAttribute('stroke-width', (sw * 2).toString());
+        ribbon.setAttribute('stroke-linecap', 'butt');
+        ribbon.setAttribute('class', 'ribbon-line');
+        line.parentNode.insertBefore(ribbon, line);
+    }
+}
+
+function applyRibbon() {
+    if (!ribbonEnabled || !svgWrapper) return;
+    applyRibbonToLines(allLines.filter(l => l.style.display !== 'none'));
+}
+
 function updateDisplay() {
     const start = parseInt(sliderStart.value);
     const end = parseInt(sliderEnd.value);
+
+    if (ribbonEnabled) clearRibbonLines();
 
     valStart.textContent = start;
     valEnd.textContent = end;
@@ -1141,6 +1182,7 @@ function updateDisplay() {
 
     layoutCropOverlay();
     updateStats();
+    applyRibbon();
 }
 
 // Arrow key support for range sliders (Safari workaround)
@@ -1204,6 +1246,12 @@ inputHeight.addEventListener('input', () => {
 });
 inputStroke.addEventListener('input', () => {
     updateStats();
+});
+document.getElementById('chk-ribbon').addEventListener('change', (e) => {
+    ribbonEnabled = e.target.checked;
+    clearRibbonLines();
+    if (ribbonEnabled) applyRibbon();
+    updatePreview();
 });
 btnResetSize.addEventListener('click', () => {
     updateSizeFromCrop();
