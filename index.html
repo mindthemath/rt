@@ -309,6 +309,52 @@ button {
 button:hover { background: #444; }
 button:active { background: #555; }
 
+/* --- inspect / erase tools --- */
+.inspect-hl {
+    stroke: #f0f !important;
+    stroke-width: 2 !important;
+    vector-effect: non-scaling-stroke;
+}
+
+body.tool-active .crop-box,
+body.tool-active .crop-handle { pointer-events: none !important; }
+
+body.tool-active #svg-container { cursor: crosshair; }
+body.tool-erase #svg-container { cursor: cell; }
+
+/* chip matching an inspect selection — must beat the inline styles styleBtn() writes */
+.chip-sel {
+    border-color: #f0f !important;
+    color: #f0f !important;
+    opacity: 1 !important;
+    box-shadow: 0 0 0 1px #f0f;
+}
+
+/* --- collapsible panels --- */
+.panel h2.collapsible {
+    cursor: pointer;
+    user-select: none;
+}
+
+.panel h2.collapsible:hover { color: #bbb; }
+
+.panel h2 .caret {
+    display: inline-block;
+    width: 0.8rem;
+    transition: transform 0.15s;
+}
+
+.panel.collapsed h2 .caret { transform: rotate(-90deg); }
+.panel.collapsed h2 { border-bottom: none; }
+.panel.collapsed .panel-body,
+.panel.collapsed #instance-toggles { display: none; }
+
+.tool-btn.on {
+    background: #6f6;
+    border-color: #6f6;
+    color: #111;
+}
+
 @media (max-width: 600px) {
     header h1 { display: none; }
 }
@@ -341,11 +387,11 @@ button:active { background: #555; }
             </div>
         </div>
         <div class="panel" id="preview-panel" style="display:none">
-            <h2>export preview</h2>
+            <h2 class="collapsible" data-panel="preview"><span class="caret">▾</span> export preview</h2>
             <div class="panel-body" id="preview-container" style="background:#fff"></div>
         </div>
         <div class="panel" id="instance-panel" style="display:none">
-            <h2 style="display:flex;align-items:center;gap:0.5rem">instances <span id="instance-quick-toggles" style="display:flex;gap:0.3rem;margin-left:auto"></span></h2>
+            <h2 class="collapsible" data-panel="instances" style="display:flex;align-items:center;gap:0.5rem"><span class="caret">▾</span>instances <span id="instance-quick-toggles" style="display:flex;gap:0.3rem;margin-left:auto"></span></h2>
             <div id="instance-toggles" style="padding:0.5rem 0.75rem;display:flex;flex-wrap:wrap;gap:0.4rem"></div>
         </div>
     </main>
@@ -368,6 +414,19 @@ button:active { background: #555; }
             <label style="display:flex;align-items:center;gap:0.3rem;color:#999;white-space:nowrap">stroke <input type="number" id="input-stroke" step="any" min="0.001" disabled style="width:5rem;background:#222;color:#ddd;border:1px solid #555;border-radius:4px;padding:0.2rem 0.4rem;font-family:inherit;font-size:0.85rem"><span id="val-stroke-unit" style="color:#6f6">cm</span></label>
             <button id="btn-reset-crop" disabled style="white-space:nowrap;padding:0.3rem 0.6rem;font-size:0.75rem">Reset Crop</button>
             <button id="btn-reset-size" disabled style="white-space:nowrap;padding:0.3rem 0.6rem;font-size:0.75rem">Reset Size</button>
+        </div>
+        <div class="footer-row">
+            <button id="btn-inspect" class="tool-btn" style="padding:0.3rem 0.6rem;font-size:0.75rem">Inspect</button>
+            <button id="btn-erase" class="tool-btn" style="padding:0.3rem 0.6rem;font-size:0.75rem">Erase</button>
+            <label style="display:flex;align-items:center;gap:0.3rem;color:#999;white-space:nowrap;font-size:0.75rem">target
+                <select id="sel-target" style="background:#222;color:#ddd;border:1px solid #555;border-radius:4px;padding:0.2rem 0.3rem;font-family:inherit;font-size:0.75rem">
+                    <option value="group">group</option>
+                    <option value="line">line</option>
+                </select>
+            </label>
+            <button id="btn-undo" style="padding:0.3rem 0.6rem;font-size:0.75rem" disabled>Undo</button>
+            <button id="btn-restore-all" style="padding:0.3rem 0.6rem;font-size:0.75rem" disabled>Restore All</button>
+            <span id="tool-status" style="font-size:0.75rem;color:#999;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0"></span>
         </div>
         <div class="footer-buttons">
             <button id="btn-reset">Clear</button>
@@ -395,6 +454,7 @@ const previewPanel = document.getElementById('preview-panel');
 const previewContainer = document.getElementById('preview-container');
 
 let allLines = [];
+let groupToggles = new Map(); // groupEl -> { visible, label, setVisible(v) }
 let stampGroups = []; // { start, count, path, groupEl }
 let instanceGroups = []; // { name, groupEl, visible }
 let svgWrapper = null;
@@ -598,6 +658,11 @@ function parseSVG(svgText) {
 
     btnExport.disabled = false;
     previewPanel.style.display = '';
+
+    // reset tool state — element references from the previous SVG are dead
+    selection = [];
+    eraseHistory = [];
+    updateToolStatus();
 
     // build crop overlay
     buildCropOverlay();
@@ -819,6 +884,8 @@ function clipLineToRect(x1, y1, x2, y2, xmin, ymin, xmax, ymax) {
 function buildExportSvg() {
     if (!svgWrapper) return null;
     const clone = svgWrapper.cloneNode(true);
+    // strip inspect highlights — they are editor-only decoration
+    clone.querySelectorAll('.inspect-hl').forEach(l => l.classList.remove('inspect-hl'));
     // always strip ribbon lines first so all processing works on clean original lines
     clone.querySelectorAll('.ribbon-line').forEach(l => l.remove());
     // when ribbon is off, also remove any stroke-linecap forced onto original lines
@@ -913,7 +980,23 @@ function buildExportSvg() {
     return clone;
 }
 
+// --- collapsible panels (state persisted per panel) ---
+document.querySelectorAll('h2.collapsible').forEach(h2 => {
+    const panel = h2.closest('.panel');
+    const key = 'svg-debug-collapsed-' + h2.dataset.panel;
+    if (localStorage.getItem(key) === '1') panel.classList.add('collapsed');
+    h2.addEventListener('click', (e) => {
+        // the quick-toggle chips live inside the instances header
+        if (e.target.closest('button')) return;
+        const collapsed = panel.classList.toggle('collapsed');
+        localStorage.setItem(key, collapsed ? '1' : '0');
+        // preview rendering is skipped while collapsed — refresh on expand
+        if (!collapsed) updatePreview();
+    });
+});
+
 function updatePreview() {
+    if (previewPanel.classList.contains('collapsed')) return;
     const clone = buildExportSvg();
     if (!clone) return;
     previewContainer.innerHTML = '';
@@ -979,6 +1062,7 @@ function buildInstanceToggles() {
     const panel = document.getElementById('instance-panel');
     const container = document.getElementById('instance-toggles');
     container.innerHTML = '';
+    groupToggles.clear();
     if (instanceGroups.length === 0 && stampGroups.length === 0) {
         panel.style.display = 'none';
         return;
@@ -1011,13 +1095,20 @@ function buildInstanceToggles() {
         styleBtn(instBtn, true, '#48f');
         styleBtn(quickBtn, true, '#48f');
 
-        function toggleInstance() {
-            inst.visible = !inst.visible;
+        function setInstanceVisible(v) {
+            inst.visible = v;
             styleBtn(instBtn, inst.visible, '#48f');
             styleBtn(quickBtn, inst.visible, '#48f');
             inst.groupEl.style.display = inst.visible ? '' : 'none';
             updateDisplay();
         }
+        groupToggles.set(inst.groupEl, {
+            get visible() { return inst.visible; },
+            label: inst.name,
+            btns: [instBtn, quickBtn],
+            setVisible: setInstanceVisible
+        });
+        const toggleInstance = () => setInstanceVisible(!inst.visible);
         instBtn.addEventListener('click', toggleInstance);
         quickBtn.addEventListener('click', toggleInstance);
         row.appendChild(instBtn);
@@ -1035,12 +1126,19 @@ function buildInstanceToggles() {
             const btn = document.createElement('button');
             btn.textContent = '#' + (i + 1) + ' ' + pathName + ' (' + lines.length + 'L)';
             styleBtn(btn, true, '#6f6');
-            btn.addEventListener('click', () => {
-                visible = !visible;
+            const setStampVisible = (v) => {
+                visible = v;
                 styleBtn(btn, visible, '#6f6');
                 el.style.display = visible ? '' : 'none';
                 updateDisplay();
+            };
+            groupToggles.set(el, {
+                get visible() { return visible; },
+                label: inst.name + ' #' + (i + 1) + ' ' + pathName,
+                btns: [btn],
+                setVisible: setStampVisible
             });
+            btn.addEventListener('click', () => setStampVisible(!visible));
             row.appendChild(btn);
         }
 
@@ -1087,12 +1185,19 @@ function buildInstanceToggles() {
             const btn = document.createElement('button');
             btn.textContent = '#' + (i + 1) + ' ' + pathName + ' (' + lines.length + 'L)';
             styleBtn(btn, true, '#6f6');
-            btn.addEventListener('click', () => {
-                visible = !visible;
+            const setStampVisible = (v) => {
+                visible = v;
                 styleBtn(btn, visible, '#6f6');
                 el.style.display = visible ? '' : 'none';
                 updateDisplay();
+            };
+            groupToggles.set(el, {
+                get visible() { return visible; },
+                label: '#' + (i + 1) + ' ' + pathName,
+                btns: [btn],
+                setVisible: setStampVisible
             });
+            btn.addEventListener('click', () => setStampVisible(!visible));
             row.appendChild(btn);
         }
 
@@ -1282,6 +1387,10 @@ btnReset.addEventListener('click', () => {
     allLines = [];
     stampGroups = [];
     instanceGroups = [];
+    groupToggles.clear();
+    selection = [];
+    eraseHistory = [];
+    updateToolStatus();
     document.getElementById('instance-panel').style.display = 'none';
     document.getElementById('instance-toggles').innerHTML = '';
     document.getElementById('instance-quick-toggles').innerHTML = '';
@@ -1310,6 +1419,219 @@ btnReset.addEventListener('click', () => {
     statCrop.textContent = '-';
     statOutput.textContent = '-';
 });
+
+// --- inspect / erase tools ---
+const btnInspect = document.getElementById('btn-inspect');
+const btnErase = document.getElementById('btn-erase');
+const btnUndo = document.getElementById('btn-undo');
+const btnRestoreAll = document.getElementById('btn-restore-all');
+const selTarget = document.getElementById('sel-target');
+const toolStatus = document.getElementById('tool-status');
+
+let activeTool = null;        // null | 'inspect' | 'erase'
+let selection = [];           // array of { kind:'group'|'line', el }
+let eraseHistory = [];        // stack of { kind, el } that were hidden
+
+function setTool(tool) {
+    activeTool = activeTool === tool ? null : tool;
+    btnInspect.classList.toggle('on', activeTool === 'inspect');
+    btnErase.classList.toggle('on', activeTool === 'erase');
+    document.body.classList.toggle('tool-active', activeTool !== null);
+    document.body.classList.toggle('tool-erase', activeTool === 'erase');
+    if (!activeTool) clearSelection();
+    updateToolStatus();
+}
+
+btnInspect.addEventListener('click', () => setTool('inspect'));
+btnErase.addEventListener('click', () => setTool('erase'));
+
+function isRendered(l) {
+    if (l.style.display === 'none') return false;
+    if (typeof l.checkVisibility === 'function') return l.checkVisibility();
+    let p = l.parentElement;
+    while (p && p !== svgWrapper) {
+        if (p.style.display === 'none') return false;
+        p = p.parentElement;
+    }
+    return true;
+}
+
+function svgPointFromEvent(e) {
+    const pt = svgWrapper.createSVGPoint();
+    pt.x = e.clientX; pt.y = e.clientY;
+    const ctm = svgWrapper.getScreenCTM();
+    if (!ctm) return null;
+    return pt.matrixTransform(ctm.inverse());
+}
+
+function distToSegment(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const len2 = dx * dx + dy * dy;
+    let t = len2 === 0 ? 0 : ((px - x1) * dx + (py - y1) * dy) / len2;
+    t = clamp(t, 0, 1);
+    const cx = x1 + t * dx, cy = y1 + t * dy;
+    return Math.hypot(px - cx, py - cy);
+}
+
+// nearest rendered line to the pointer, within a screen-space tolerance
+function lineAtEvent(e) {
+    if (!svgWrapper) return null;
+    const p = svgPointFromEvent(e);
+    if (!p) return null;
+    const rect = svgWrapper.getBoundingClientRect();
+    if (!rect.width) return null;
+    const tol = 14 * (origVB.w / rect.width); // 14px in viewBox units
+    let best = null, bestD = Infinity;
+    for (const l of allLines) {
+        if (!isRendered(l)) continue;
+        const d = distToSegment(
+            p.x, p.y,
+            parseFloat(l.getAttribute('x1')), parseFloat(l.getAttribute('y1')),
+            parseFloat(l.getAttribute('x2')), parseFloat(l.getAttribute('y2'))
+        );
+        if (d < bestD) { bestD = d; best = l; }
+    }
+    return bestD <= tol ? best : null;
+}
+
+// resolve a line to what the current target mode acts on
+function targetFor(line) {
+    if (selTarget.value === 'line') return { kind: 'line', el: line };
+    const g = line.closest('g[data-stamp-path]') || line.closest('g[data-instance]');
+    return g && groupToggles.has(g) ? { kind: 'group', el: g } : { kind: 'line', el: line };
+}
+
+function targetLines(t) {
+    return t.kind === 'line' ? [t.el] : Array.from(t.el.querySelectorAll('line'));
+}
+
+function targetLabel(t) {
+    if (t.kind === 'line') return 'line ' + allLines.indexOf(t.el);
+    const entry = groupToggles.get(t.el);
+    const n = t.el.querySelectorAll('line').length;
+    return (entry ? entry.label : 'group') + ' (' + n + 'L)';
+}
+
+function applyHighlights() {
+    if (svgWrapper) svgWrapper.querySelectorAll('.inspect-hl').forEach(l => l.classList.remove('inspect-hl'));
+    document.querySelectorAll('.chip-sel').forEach(b => b.classList.remove('chip-sel'));
+    for (const t of selection) {
+        targetLines(t).forEach(l => l.classList.add('inspect-hl'));
+        if (t.kind === 'group') {
+            const entry = groupToggles.get(t.el);
+            if (entry && entry.btns) entry.btns.forEach(b => b.classList.add('chip-sel'));
+        }
+    }
+}
+
+function clearSelection() {
+    selection = [];
+    applyHighlights();
+}
+
+function updateToolStatus() {
+    btnUndo.disabled = eraseHistory.length === 0;
+    btnRestoreAll.disabled = eraseHistory.length === 0;
+    if (!activeTool) {
+        toolStatus.textContent = eraseHistory.length ? eraseHistory.length + ' erased' : '';
+        return;
+    }
+    const hint = activeTool === 'inspect'
+        ? 'click to select, shift+click to add, delete to erase'
+        : 'click to erase';
+    const sel = selection.length
+        ? selection.length + ' selected: ' + selection.map(targetLabel).join(', ')
+        : hint;
+    toolStatus.textContent = sel + (eraseHistory.length ? '  ·  ' + eraseHistory.length + ' erased' : '');
+}
+
+function eraseTarget(t) {
+    if (t.kind === 'group') {
+        const entry = groupToggles.get(t.el);
+        if (!entry || !entry.visible) return false;
+        entry.setVisible(false);
+    } else {
+        if (t.el.dataset.userHidden === '1') return false;
+        t.el.dataset.userHidden = '1';
+        updateDisplay();
+    }
+    eraseHistory.push(t);
+    return true;
+}
+
+function restoreTarget(t) {
+    if (t.kind === 'group') {
+        const entry = groupToggles.get(t.el);
+        if (entry) entry.setVisible(true);
+    } else {
+        delete t.el.dataset.userHidden;
+        updateDisplay();
+    }
+}
+
+btnUndo.addEventListener('click', () => {
+    const t = eraseHistory.pop();
+    if (t) restoreTarget(t);
+    updateToolStatus();
+});
+
+btnRestoreAll.addEventListener('click', () => {
+    while (eraseHistory.length) restoreTarget(eraseHistory.pop());
+    updateToolStatus();
+});
+
+svgContainer.addEventListener('click', (e) => {
+    if (!activeTool || !svgWrapper) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const line = lineAtEvent(e);
+
+    if (activeTool === 'erase') {
+        if (line) eraseTarget(targetFor(line));
+        clearSelection();
+        updateToolStatus();
+        return;
+    }
+
+    // inspect
+    if (!line) {
+        if (!e.shiftKey) clearSelection();
+        updateToolStatus();
+        return;
+    }
+    const t = targetFor(line);
+    const idx = selection.findIndex(s => s.el === t.el && s.kind === t.kind);
+    if (e.shiftKey) {
+        if (idx >= 0) selection.splice(idx, 1);
+        else selection.push(t);
+    } else {
+        selection = (idx >= 0 && selection.length === 1) ? [] : [t];
+    }
+    applyHighlights();
+    updateToolStatus();
+});
+
+document.addEventListener('keydown', (e) => {
+    const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName);
+    if (e.key === 'Escape') { clearSelection(); updateToolStatus(); return; }
+    if (typing) return;
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selection.length) {
+        e.preventDefault();
+        selection.forEach(eraseTarget);
+        clearSelection();
+        updateToolStatus();
+    } else if ((e.metaKey || e.ctrlKey) && e.key === 'z' && eraseHistory.length) {
+        e.preventDefault();
+        restoreTarget(eraseHistory.pop());
+        updateToolStatus();
+    } else if (e.key === 'i') {
+        setTool('inspect');
+    } else if (e.key === 'e') {
+        setTool('erase');
+    }
+});
+
+selTarget.addEventListener('change', () => { clearSelection(); updateToolStatus(); });
 
 // --- export ---
 btnExport.addEventListener('click', () => {
